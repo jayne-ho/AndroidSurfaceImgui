@@ -2,6 +2,7 @@
 #define A_NATIVE_WINDOW_CREATOR_H
 
 #include <android/native_window.h>
+#include <sys/system_properties.h>
 #include <dlfcn.h>
 
 #include <cstddef>
@@ -10,6 +11,7 @@ namespace android
 {
     namespace detail
     {
+
         namespace ui
         {
             // A LayerStack identifies a Z-ordered group of layers. A layer can only be associated to a single
@@ -82,12 +84,22 @@ namespace android
 
             void (*SurfaceComposerClient__Constructor)(void *thiz) = nullptr;
             void (*SurfaceComposerClient__Destructor)(void *thiz) = nullptr;
+
             sp<void> (*SurfaceComposerClient__CreateSurface)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, void *layerMetadata, uint32_t *outTransformHint) = nullptr;
+
+            sp<void> (*SurfaceComposerClient__CreateSurface10)(void *thiz, void *name, uint32_t w, uint32_t h, int32_t format, uint32_t flags, void *parentHandle, void *layerMetadata) = nullptr;
+
             sp<void> (*SurfaceComposerClient__GetInternalDisplayToken)() = nullptr;
             int32_t (*SurfaceComposerClient__GetDisplayState)(sp<void> &display, ui::DisplayState *displayState) = nullptr;
 
             int32_t (*SurfaceControl__Validate)(void *thiz) = nullptr;
             sp<Surface> (*SurfaceControl__GetSurface)(void *thiz) = nullptr;
+
+            int get_android_api_level(){
+                char prop_value[PROP_VALUE_MAX];
+                __system_property_get("ro.build.version.sdk", prop_value);
+                return atoi(prop_value);
+            }
 
             Functionals()
             {
@@ -108,12 +120,29 @@ namespace android
                 LayerMetadata__Constructor = reinterpret_cast<decltype(LayerMetadata__Constructor)>(dlsym(libgui, "_ZN7android13LayerMetadataC2Ev"));
 
                 SurfaceComposerClient__Constructor = reinterpret_cast<decltype(SurfaceComposerClient__Constructor)>(dlsym(libgui, "_ZN7android21SurfaceComposerClientC2Ev"));
-                SurfaceComposerClient__CreateSurface = reinterpret_cast<decltype(SurfaceComposerClient__CreateSurface)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijRKNS_2spINS_7IBinderEEENS_13LayerMetadataEPj"));
+
+                if(get_android_api_level() > 30){// 安卓12-13
+                    SurfaceComposerClient__CreateSurface = reinterpret_cast<decltype(SurfaceComposerClient__CreateSurface)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijRKNS_2spINS_7IBinderEEENS_13LayerMetadataEPj"));
+                }else if(get_android_api_level() == 30){// 安卓11
+                    SurfaceComposerClient__CreateSurface = reinterpret_cast<decltype(SurfaceComposerClient__CreateSurface)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijPNS_14SurfaceControlENS_13LayerMetadataEPj"));
+                }else if(get_android_api_level() == 29){ //安卓10
+                    SurfaceComposerClient__CreateSurface10 = reinterpret_cast<decltype(SurfaceComposerClient__CreateSurface10)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijPNS_14SurfaceControlENS_13LayerMetadataE"));
+                }
+
                 SurfaceComposerClient__GetInternalDisplayToken = reinterpret_cast<decltype(SurfaceComposerClient__GetInternalDisplayToken)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient23getInternalDisplayTokenEv"));
-                SurfaceComposerClient__GetDisplayState = reinterpret_cast<decltype(SurfaceComposerClient__GetDisplayState)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient15getDisplayStateERKNS_2spINS_7IBinderEEEPNS_2ui12DisplayStateE"));
+                if(get_android_api_level() > 29){// 安卓11-13
+                    SurfaceComposerClient__GetDisplayState = reinterpret_cast<decltype(SurfaceComposerClient__GetDisplayState)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient15getDisplayStateERKNS_2spINS_7IBinderEEEPNS_2ui12DisplayStateE"));
+                }else if(get_android_api_level() == 29){ // 安卓10
+                    SurfaceComposerClient__GetDisplayState = reinterpret_cast<decltype(SurfaceComposerClient__GetDisplayState)>(dlsym(libgui, "_ZN7android21SurfaceComposerClient14getDisplayInfoERKNS_2spINS_7IBinderEEEPNS_11DisplayInfoE"));
+                }
 
                 SurfaceControl__Validate = reinterpret_cast<decltype(SurfaceControl__Validate)>(dlsym(libgui, "_ZNK7android14SurfaceControl8validateEv"));
-                SurfaceControl__GetSurface = reinterpret_cast<decltype(SurfaceControl__GetSurface)>(dlsym(libgui, "_ZN7android14SurfaceControl10getSurfaceEv"));
+
+                if(get_android_api_level() > 30){// 安卓12-13
+                    SurfaceControl__GetSurface = reinterpret_cast<decltype(SurfaceControl__GetSurface)>(dlsym(libgui, "_ZN7android14SurfaceControl10getSurfaceEv"));
+                }else if(get_android_api_level() > 28){ // 安卓10
+                    SurfaceControl__GetSurface = reinterpret_cast<decltype(SurfaceControl__GetSurface)>(dlsym(libgui, "_ZNK7android14SurfaceControl10getSurfaceEv"));
+                }
             }
         };
 
@@ -214,9 +243,15 @@ namespace android
                 String8 windowName(name);
                 LayerMetadata layerMetadata;
 
-                auto result = SurfaceComposerClient__CreateSurface(data, windowName, width, height, 1, 0, &parentHandle, layerMetadata, nullptr);
+                if(get_android_api_level() > 29){ // 安卓11-13
+                    auto result = SurfaceComposerClient__CreateSurface(data, windowName, width, height, 1, 0, &parentHandle, layerMetadata, nullptr);
+                    return {result.get()};
+                }else if(get_android_api_level() == 29){ // 安卓10
+                    auto result = SurfaceComposerClient__CreateSurface10(data, windowName, width, height, 1, 0, &parentHandle, layerMetadata);
+                    return {result.get()};
+                }
 
-                return {result.get()};
+                return {nullptr};
             }
 
             bool GetDisplayInfo(ui::DisplayState *displayInfo)
